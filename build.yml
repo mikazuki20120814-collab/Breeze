@@ -1,0 +1,68 @@
+name: Build Breeze
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  CEF_VERSION: "131.4.1+g437feba+chromium-131.0.6778.265"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache CEF
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: cef
+          key: cef-${{ env.CEF_VERSION }}-windows64
+
+      - name: Download CEF
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          NAME="cef_binary_${CEF_VERSION}_windows64"
+          ENC="${NAME//+/%2B}"
+          curl -fL -o cef.tar.bz2 "https://cef-builds.spotifycdn.com/${ENC}.tar.bz2"
+          7z x cef.tar.bz2 -y > /dev/null
+          7z x cef.tar -y > /dev/null
+          mv "$NAME" cef
+          rm -f cef.tar.bz2 cef.tar
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCEF_ROOT="${{ github.workspace }}/cef"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Check output
+        run: |
+          dir build\Release\Breeze.exe
+          dir build\Release\libcef.dll
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\breeze.iss'
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BreezeSetup
+          path: installer/Output/BreezeSetup.exe
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Breeze-portable
+          path: |
+            build/Release
+            !build/Release/**/*.pdb
+            !build/Release/*.lib
+            !build/Release/*.exp
